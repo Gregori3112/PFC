@@ -1,0 +1,39 @@
+=============================================
+   RESULTADOS FINAIS DA OTIMIZAÇÃO PSO
+=============================================
+
+Melhor L/D encontrado.............: 51.2681
+CL................................: 0.2646
+CD................................: 0.0052
+L/W...............................: 23.09%
+CL ideal para L=W.................: 1.1457
+
+Variáveis ótimas:
+  AR         = 10.00000
+  span       = 34.00000
+  taper      = 1.00000
+  sweep      = 10.00000
+  twist      = 1.49308
+
+=============================================
+ ANALISE AERODINÂMICA AVANÇADA
+=============================================
+
+Aspect Ratio......................: 10.0000
+Envergadura (span)................: 34.0000 ft
+Taper Ratio.......................: 1.0000
+Sweep.............................: 10.0000°
+Twist.............................: 1.4931°
+
+Diagnóstico físico:
+- AR elevado reduz o arrasto induzido e melhora L/D.
+- Taper adequado aproxima a distribuição elíptica.
+- Sweep baixo melhora CL em Mach moderado.
+- Washout (twist negativo) reduz estol de ponta.
+- Solver inviscid superestima L/D (não inclui CD0 real).
+
+Resumo para TCC:
+A otimização com PSO mostrou forte influência do Aspect Ratio,
+taper e twist na eficiência aerodinâmica, atingindo um L/D máximo
+de 51.27. O método demonstra claramente como tendências
+aerodinâmicas podem ser exploradas com OpenVSP + PSO.

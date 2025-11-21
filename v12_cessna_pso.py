@@ -45,7 +45,7 @@ xmin = np.array([6, 34, 0.5, 0.0, -3.0])
 xmax = np.array([10, 38, 1.0, 10.0, 3.0])
 
 nrvar = len(xmin)       # número de variáveis = 5
-pop = 2                # quantidade de partículas
+pop = 8                # quantidade de partículas
 itermax = 10           # número máximo de iterações do PSO
 tol = 1e-4              # tolerância para critério de estagnação
 
@@ -69,6 +69,7 @@ os.makedirs(output_dir, exist_ok=True)
 history_particles = {v: [] for v in var_names}
 history_gbest = {v: [] for v in var_names}
 gbest_history = []
+ld_history = []
 
 
 # ============================================================
@@ -81,8 +82,8 @@ v = np.zeros((pop, nrvar))       # velocidade de cada partícula
 lbest = np.full(pop, np.inf)     # melhor valor já encontrado por cada partícula
 xlbest = np.zeros((pop, nrvar))  # melhor posição já encontrada por cada partícula
 
-gbest = [1e30]                   # melhor valor global
-k = 1                            # contador de iterações
+gbest_value = 1e30   # melhor valor global escalar
+k = 1                # contador de iterações                           # contador de iterações
 
 # ASA BASE para iniciar o PSO
 asa_base = np.array([7.5, 36.0, 1.0, 0.0, 0.0])
@@ -103,14 +104,23 @@ for i in range(pop):
     CL = data["CL"]
     CD = data["CD"]
     LD = data["LD"]
+    Alpha = data["Alpha"]
+
+    if i == 0:
+        alpha_base = Alpha
+        print(f"[info] Alpha da asa base = {alpha_base:.3f}°")
+
+        ld_history.append(LD)   # adiciona o L/D da asa base no histórico
+        # ----------------------------------------------
 
     # Salva melhor local
     lbest[i] = y
     xlbest[i, :] = x[i, :]
 
     # Atualiza melhor global
-    if y < gbest[k - 1]:
-        gbest[k - 1] = y
+    if y < gbest_value:
+        gbest_value = y
+        gbest_history.append(gbest_value)
         xgbest = x[i, :].copy()
         CL_best = CL
         CD_best = CD
@@ -125,13 +135,10 @@ plt.pause(0.1)
 
 flag = False
 k = 2
-gbest.append(gbest[0])
-ld_history = []
+
 
 while not flag:
 
-    # Mantém o valor anterior (estilo MATLAB: gbest(k)=gbest(k-1))
-    gbest.append(gbest[k - 2])
 
     # ========================================================
     # Atualiza posição e avalia cada partícula
@@ -170,8 +177,8 @@ while not flag:
             xlbest[i, :] = x[i, :]
 
         # Melhor global (gbest)
-        if ynew < gbest[k - 1]:
-            gbest[k - 1] = ynew
+        if ynew < gbest_value:
+            gbest_value = ynew
             xgbest = x[i, :].copy()
             CL_best = CL
             CD_best = CD
@@ -180,7 +187,8 @@ while not flag:
     # ========================================================
     # Guarda histórico das partículas e do gbest
     # ========================================================
-    gbest_history.append(gbest[k - 1])
+    gbest_history.append(gbest_value)
+
 
     for idx, var in enumerate(var_names):
         history_particles[var].append(x[:, idx].copy())
@@ -202,7 +210,7 @@ while not flag:
         if delta < tol:
             flag = True
 
-    print(f"[iter {k-1}] gbest={gbest[k-1]:.4f} | L/D≈{LD_best:.2f} | xgbest={xgbest}")
+    print(f"[iter {k-1}] gbest={gbest_value:.4f} | L/D≈{LD_best:.2f} (gbest) | xgbest={xgbest}")
     ld_history.append(LD_best)
 
     k += 1

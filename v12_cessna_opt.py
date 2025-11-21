@@ -14,6 +14,8 @@
 
 import os
 import sys
+import time
+import gc
 import numpy as np
 from openvsp import openvsp as vsp
 
@@ -63,11 +65,26 @@ def FCN(x: np.ndarray):
     # Remove qualquer modelo carregado anteriormente
     vsp.ClearVSPModel()
 
-    # Carrega o arquivo .vsp3 original
     vsp.ReadVSPFile(VSP3_FILE)
 
+    # Captura os IDs reais da geometria
+    geom_ids = vsp.FindGeoms()
+
+    # Busca a asa principal automaticamente
+    wing_id = None
+    for gid in geom_ids:
+        if vsp.GetGeomTypeName(gid) == "Wing":
+            wing_id = gid
+            break
+
+    if wing_id is None:
+        raise RuntimeError("ERRO: Nenhuma asa encontrada no modelo!")
+
+    print(f"Wing ID encontrado: {wing_id}")
+
+
     # ID da asa principal (fixo dentro do modelo)
-    wing_id = "ITDQSYJOYI"
+    #wing_id = "ITDQSYJOYI"
 
     # Nome interno do solver usado pelo OpenVSP
     solver_id = "VSPAEROSweep"
@@ -119,8 +136,7 @@ def FCN(x: np.ndarray):
     # ------------------------------------------------------------
     vsp.SetAnalysisInputDefaults(solver_id)  # reseta opções
 
-    # 🔥 ATIVA VORTEX + PARASITE DRAG
-    vsp.SetIntAnalysisInput(solver_id, "AnalysisMethod", [2])
+
 
     # Evita erros com arquivos opcionais que o solver não precisa gerar
     available_inputs = []
@@ -148,24 +164,25 @@ def FCN(x: np.ndarray):
     # Cordas médias para referência aerodinâmica
     cref = (2/3) * croot * ((1 + taper + taper**2) / (1 + taper))
 
-    # Condições de voo
-    W = 1800 * 9.81                     # peso total [N]
-    rho = 0.002377 * 515.379            # densidade convertida p/ SI
-    T = 288.15                          # temperatura ISA
+    # Condições de voo (usar unidades IMPERIAIS para bater com o VSPAERO)
+    W = 1800 * 2.20462        # peso total [lbf]
+    rho = 0.002377            # densidade [slug/ft^3]
+    T = 288.15
     gamma = 1.4
     R = 287.05
-    M = 0.3                             # número de Mach
-    a = (gamma * R * T) ** 0.5          # velocidade do som
-    V = M * a                           # velocidade real [m/s]
+    M = 0.3
 
-    # Área em m² (VSP trabalha em ft/s na análise)
-    S = sref * (0.3048 ** 2)
+    # Velocidade do som em m/s e depois converte para ft/s
+    a_SI = (gamma * R * T) ** 0.5       # [m/s]
+    V_SI = M * a_SI                     # [m/s]
+    V_ft = V_SI / 0.3048                # [ft/s]
+    # Área de referência em ft² (mesma que o solver usa)
+    Sref = sref                         # [ft^2]
 
     # Caminho do history produzido pelo solver
     hist_path = r"C:\VSP\Development\PSO_PYTHON_WING\cessna_updated.history"
 
-    print(f"[flight] Mach={M:.2f} → V={V:.2f} m/s ({V/0.3048:.1f} ft/s)")
-
+    print(f"[flight] Mach={M:.2f} → V={V_SI:.2f} m/s ({V_ft:.1f} ft/s)")
 
     # ============================================================
     # 5) AJUSTE AUTOMÁTICO DE ALPHA PARA GARANTIR L ≈ W
@@ -174,14 +191,14 @@ def FCN(x: np.ndarray):
     alpha    = 0.0      # valor inicial (graus)
     step     = 0.5      # passo de correção
 
-    for _ in range(4):   # número de ciclos de ajuste (rápido)
+    for _ in range(8):   # número de ciclos de ajuste (rápido)
         
         # Configura solver
         vsp.SetIntAnalysisInput(solver_id, "NumWakeNodes", [32])
         vsp.SetIntAnalysisInput(solver_id, "NCPU", [4])
-        vsp.SetDoubleAnalysisInput(solver_id, "Sref", [sref])
-        vsp.SetDoubleAnalysisInput(solver_id, "Rho", [0.002377])
-        vsp.SetDoubleAnalysisInput(solver_id, "Vinf", [V / 0.3048])
+        vsp.SetDoubleAnalysisInput(solver_id, "Sref", [Sref])   # ft^2
+        vsp.SetDoubleAnalysisInput(solver_id, "Rho",  [rho])    # slug/ft^3
+        vsp.SetDoubleAnalysisInput(solver_id, "Vinf", [V_ft])   # ft/s
         vsp.SetDoubleAnalysisInput(solver_id, "MachStart", [M])
         vsp.SetDoubleAnalysisInput(solver_id, "MachEnd", [M])
         vsp.SetIntAnalysisInput(solver_id, "MachNpts", [1])
@@ -194,7 +211,7 @@ def FCN(x: np.ndarray):
         vsp.ExecAnalysis(solver_id)
 
         # Aguarda history ser criado
-        import time
+
         for _ in range(10):
             if os.path.exists(hist_path):
                 break
@@ -207,19 +224,19 @@ def FCN(x: np.ndarray):
 
         last_line = lines[-1].split()
         cl = float(last_line[6])
-        cd = float(last_line[9])
+
 
         # Cálculo da sustentação
-        L = 0.5 * rho * V**2 * S * cl
+        L = 0.5 * rho * V_ft**2 * Sref * cl   # L em lbf
         error = (L - target_L) / target_L
 
-        if abs(error) < 0.05:  # convergiu
+        if abs(error) < 0.01:  # convergiu
             break
 
         # Ajusta alpha com correção proporcional
         alpha -= step * error
 
-    print(f"[auto-alpha] Alpha ajustado para {alpha:.2f}° com L={L:.1f} N")
+    print(f"[auto-alpha] Alpha ajustado para {alpha:.2f}° com L={L:.1f} lbf")
 
 
     # ============================================================
@@ -228,32 +245,35 @@ def FCN(x: np.ndarray):
 
     with open(hist_path, "r") as f:
         lines = [l.strip() for l in f.readlines()
-                 if l.strip() and not l.startswith("#")]
+                if l.strip() and not l.startswith("#")]
 
     last_line = lines[-1].split()
 
     # Leitura dos coeficientes aerodinâmicos
-    cl = float(last_line[6])
-    cd = float(last_line[9])
+    cl = float(last_line[6])      # CLtot
+    cd = float(last_line[9])      # CDtot = CDo + CDi
     ld = cl / cd
 
+    print(f"[coeffs] CL={cl:.5f}, CD={cd:.5f}, L/D={ld:.2f}")
+
     # Sustentação final
-    L = 0.5 * rho * V**2 * S * cl
+    L = 0.5 * rho * V_ft**2 * Sref * cl    # lbf
 
     # Verificação da faixa de sustentação
     L_min = W * 0.95
     L_max = W * 1.05
 
     if L < L_min or L > L_max:
-        penalty = 100 * abs((L - W) / W) ** 1.5
-        print(f"[penalty] L fora da faixa: {L:.1f} N (peso={W:.1f}, penalidade={penalty:.2f})")
+        penalty = 1000 * abs((L - W) / W) ** 2
+        print(f"[penalty] L fora da faixa: {L:.1f} lbf (peso={W:.1f} lbf, penalidade={penalty:.2f})")
     else:
         penalty = 0
 
     # Exibe resultados
-    print(f"[ok] CL={cl:.4f}, CD={cd:.4f}, L={L:.2f}, L/D={ld:.2f}")
+    print(f"[ok] CL={cl:.4f}, CD={cd:.4f}, L={L:.2f} lbf, L/D={ld:.2f}")
     print(f"[status] Sustentação {'OK' if penalty == 0 else 'fora'} | α={alpha:.2f}°")
     print("[solver] VSPAERO executado.")
+
 
 
     # ============================================================
@@ -265,7 +285,7 @@ def FCN(x: np.ndarray):
     # ------------------------------------------------------------
     # Limpeza final da memória interna do OpenVSP
     # ------------------------------------------------------------
-    import gc
+
     vsp.ClearVSPModel()
     time.sleep(1)
     gc.collect()
@@ -284,4 +304,6 @@ if __name__ == "__main__":
     x_test = np.array([7.5, 36.0, 1.0, 0.0, 0.0])
     resultado = FCN(x_test)
     print("Resultado do teste:", resultado)
+
+
 

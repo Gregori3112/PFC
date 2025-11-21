@@ -1,14 +1,11 @@
 from openvsp import openvsp as vsp
 
-# Limpa qualquer modelo em memória
 vsp.ClearVSPModel()
+vsp.ReadVSPFile(r"C:\VSP\Development\PSO_PYTHON_WING\cessna210.vsp3")
 
-print("\n=== Análises disponíveis ===")
-for name in vsp.GetAnalysisNameList():
-    print("-", name)
-    try:
-        print("  Parâmetros:", vsp.GetAnalysisInputNames(name))
-    except:
-        print("  (sem inputs ou erro ao listar)")
+geom_ids = vsp.FindGeoms()
 
-
+print("\n[debug] Geometrias e seus Sets:")
+for gid in geom_ids:
+    sets = vsp.GetGeomSet(gid)
+    print(f"{gid} → {sets}")
